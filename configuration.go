@@ -37,6 +37,7 @@ type GlobalConfiguration struct {
 	Etcd                      *provider.Etcd
 	Zookeeper                 *provider.Zookepper
 	Boltdb                    *provider.BoltDb
+	Kubernetes                *provider.Kubernetes
 }
 
 // DefaultEntryPoints holds default entry points
