@@ -1,16 +1,14 @@
 package provider
 
 import (
-	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/emilevauge/traefik/types"
-	"hash/fnv"
+	"github.com/containous/traefik/types"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/pkg/client/restclient"
 	client "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/util"
 	"reflect"
 )
 
@@ -26,7 +24,7 @@ type Kubernetes struct {
 func (provider *Kubernetes) Provide(configurationChan chan<- types.ConfigMessage) error {
 	//var KubernetesFuncMap = template.FuncMap{}
 	var ingClient client.IngressInterface
-	config := &client.Config{
+	config := &restclient.Config{
 		Host: provider.Endpoint,
 	}
 	kubeClient, err := client.New(config)
@@ -36,13 +34,13 @@ func (provider *Kubernetes) Provide(configurationChan chan<- types.ConfigMessage
 	} else {
 		ingClient = kubeClient.Extensions().Ingress(api.NamespaceAll)
 	}
-	rateLimiter := util.NewTokenBucketRateLimiter(0.1, 1)
+	// rateLimiter := util.NewTokenBucketRateLimiter(0.1, 1)
 
 	go func() {
 		known := &extensions.IngressList{}
 		// Controller loop
 		for {
-			rateLimiter.Accept()
+			// rateLimiter.Accept()
 			ingresses, err := ingClient.List(api.ListOptions{})
 			if err != nil {
 				log.Printf("Error retrieving ingresses: %v", err)
@@ -109,11 +107,6 @@ func (provider *Kubernetes) Provide(configurationChan chan<- types.ConfigMessage
 					}
 				}
 			}
-			// reload
-			//configuration, err := provider.getConfiguration("templates/kubernetes.tmpl", KubernetesFuncMap, templateObjects)
-			//if err != nil {
-			//	log.Error(err)
-			//}
 			configurationChan <- types.ConfigMessage{
 				ProviderName:  "kubernetes",
 				Configuration: &templateObjects,
@@ -121,10 +114,4 @@ func (provider *Kubernetes) Provide(configurationChan chan<- types.ConfigMessage
 		}
 	}()
 	return nil
-}
-
-func hash(s interface{}) uint32 {
-	h := fnv.New32a()
-	h.Write([]byte(fmt.Sprintf("%v", s)))
-	return h.Sum32()
 }
