@@ -409,47 +409,6 @@ func TestDockerGetWeight(t *testing.T) {
 	}
 }
 
-func TestDockerGetDomain(t *testing.T) {
-	provider := &Docker{
-		Domain: "docker.localhost",
-	}
-
-	containers := []struct {
-		container docker.ContainerJSON
-		expected  string
-	}{
-		{
-			container: docker.ContainerJSON{
-				ContainerJSONBase: &docker.ContainerJSONBase{
-					Name: "foo",
-				},
-				Config: &container.Config{},
-			},
-			expected: "docker.localhost",
-		},
-		{
-			container: docker.ContainerJSON{
-				ContainerJSONBase: &docker.ContainerJSONBase{
-					Name: "test",
-				},
-				Config: &container.Config{
-					Labels: map[string]string{
-						"traefik.domain": "foo.bar",
-					},
-				},
-			},
-			expected: "foo.bar",
-		},
-	}
-
-	for _, e := range containers {
-		actual := provider.getDomain(e.container)
-		if actual != e.expected {
-			t.Fatalf("expected %q, got %q", e.expected, actual)
-		}
-	}
-}
-
 func TestDockerGetProtocol(t *testing.T) {
 	provider := &Docker{}
 

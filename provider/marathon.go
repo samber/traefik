@@ -113,7 +113,6 @@ func (provider *Marathon) loadMarathonConfig() *types.Configuration {
 		"getBackend":         provider.getBackend,
 		"getPort":            provider.getPort,
 		"getWeight":          provider.getWeight,
-		"getDomain":          provider.getDomain,
 		"getProtocol":        provider.getProtocol,
 		"getPassHostHeader":  provider.getPassHostHeader,
 		"getPriority":        provider.getPriority,
@@ -295,13 +294,6 @@ func (provider *Marathon) getWeight(task marathon.Task, applications []marathon.
 		return label
 	}
 	return "0"
-}
-
-func (provider *Marathon) getDomain(application marathon.Application) string {
-	if label, err := provider.getLabel(application, "traefik.domain"); err == nil {
-		return label
-	}
-	return provider.Domain
 }
 
 func (provider *Marathon) getProtocol(task marathon.Task, applications []marathon.Application) string {

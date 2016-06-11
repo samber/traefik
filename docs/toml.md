@@ -587,7 +587,6 @@ Labels can be used on containers to override default behaviour:
 - `traefik.frontend.passHostHeader=true`: forward client `Host` header to the backend.
 - `traefik.frontend.priority=10`: override default frontend priority
 - `traefik.frontend.entryPoints=http,https`: assign this frontend to entry points `http` and `https`. Overrides `defaultEntryPoints`.
-- `traefik.domain=traefik.localhost`: override the default domain
 - `traefik.docker.network`: Set the docker network to use for connections to this container
 
 
@@ -620,13 +619,6 @@ endpoint = "http://127.0.0.1:8080"
 # Optional
 #
 watch = true
-
-# Default domain used.
-# Can be overridden by setting the "traefik.domain" label on an application.
-#
-# Required
-#
-domain = "marathon.localhost"
 
 # Override default configuration template. For advanced users :)
 #
@@ -678,7 +670,6 @@ Labels can be used on containers to override default behaviour:
 - `traefik.frontend.passHostHeader=true`: forward client `Host` header to the backend.
 - `traefik.frontend.priority=10`: override default frontend priority
 - `traefik.frontend.entryPoints=http,https`: assign this frontend to entry points `http` and `https`. Overrides `defaultEntryPoints`.
-- `traefik.domain=traefik.localhost`: override the default domain
 
 
 ## Kubernetes Ingress backend

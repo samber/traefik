@@ -167,7 +167,6 @@ func (provider *Docker) loadDockerConfig(containersInspected []dockertypes.Conta
 		"getIPAddress":      provider.getIPAddress,
 		"getPort":           provider.getPort,
 		"getWeight":         provider.getWeight,
-		"getDomain":         provider.getDomain,
 		"getProtocol":       provider.getProtocol,
 		"getPassHostHeader": provider.getPassHostHeader,
 		"getPriority":       provider.getPriority,
@@ -281,13 +280,6 @@ func (provider *Docker) getWeight(container dockertypes.ContainerJSON) string {
 		return label
 	}
 	return "1"
-}
-
-func (provider *Docker) getDomain(container dockertypes.ContainerJSON) string {
-	if label, err := getLabel(container, "traefik.domain"); err == nil {
-		return label
-	}
-	return provider.Domain
 }
 
 func (provider *Docker) getProtocol(container dockertypes.ContainerJSON) string {

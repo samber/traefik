@@ -676,37 +676,6 @@ func TestMarathonGetWeigh(t *testing.T) {
 	}
 }
 
-func TestMarathonGetDomain(t *testing.T) {
-	provider := &Marathon{
-		Domain: "docker.localhost",
-	}
-
-	applications := []struct {
-		application marathon.Application
-		expected    string
-	}{
-		{
-			application: marathon.Application{},
-			expected:    "docker.localhost",
-		},
-		{
-			application: marathon.Application{
-				Labels: map[string]string{
-					"traefik.domain": "foo.bar",
-				},
-			},
-			expected: "foo.bar",
-		},
-	}
-
-	for _, a := range applications {
-		actual := provider.getDomain(a.application)
-		if actual != a.expected {
-			t.Fatalf("expected %q, got %q", a.expected, actual)
-		}
-	}
-}
-
 func TestMarathonGetProtocol(t *testing.T) {
 	provider := &Marathon{}
 
