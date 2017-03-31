@@ -37,9 +37,10 @@ type ConsulCatalog struct {
 }
 
 type catalogUpdate struct {
-	ServiceName string
-	Attributes  []string
-	Nodes       []*api.ServiceEntry
+	ServiceName       string
+	UniqueServiceName string
+	Attributes        []string
+	Nodes             []*api.ServiceEntry
 }
 
 type nodeSorter []*api.ServiceEntry
@@ -85,8 +86,8 @@ func (a serviceSorter) Less(i int, j int) bool {
 	lentr := a[i]
 	rentr := a[j]
 
-	ls := strings.ToLower(lentr.ServiceName)
-	lr := strings.ToLower(rentr.ServiceName)
+	ls := strings.ToLower(lentr.UniqueServiceName)
+	lr := strings.ToLower(rentr.UniqueServiceName)
 
 	return ls < lr
 }
@@ -139,7 +140,7 @@ func (provider *ConsulCatalog) healthyNodes(service string) ([]catalogUpdate, er
 		return []catalogUpdate{}, err
 	}
 
-	// We group services by frontend rule, to build many-to-many relation between frontends and backends
+	// We group services by frontend rule
 	serviceUpdateMap := fun.Foldl(func(node *api.ServiceEntry, set map[string]catalogUpdate) map[string]catalogUpdate {
 		frontendRule := provider.getAttribute("frontend.rule", node.Service.Tags, "")
 
@@ -168,8 +169,9 @@ func (provider *ConsulCatalog) healthyNodes(service string) ([]catalogUpdate, er
 		} else {
 			// First node with this frontend rule
 			set[frontendRule] = catalogUpdate{
-				ServiceName: service,
-				Attributes:  node.Service.Tags,
+				ServiceName:       service,
+				UniqueServiceName: service,
+				Attributes:        node.Service.Tags,
 				Nodes: []*api.ServiceEntry{
 					node,
 				},
@@ -178,24 +180,25 @@ func (provider *ConsulCatalog) healthyNodes(service string) ([]catalogUpdate, er
 		return set
 	}, map[string]catalogUpdate{}, data).(map[string]catalogUpdate)
 
-	// From Map[frontend.rule]catalogUpdate to []catalogUpdate
-	serviceUpdateSlice := fun.Values(serviceUpdateMap).([]catalogUpdate)
-
-	for i := range serviceUpdateSlice {
-		// Add an index to ServiceName to prevent overlap
-		serviceUpdateSlice[i].ServiceName = serviceUpdateSlice[i].ServiceName + "-" + strconv.Itoa(i)
-		// Ensure a stable ordering of nodes so that identical configurations may be detected
-		sort.Sort(nodeSorter(serviceUpdateSlice[i].Nodes))
+	// Set a unique service name to prevent frontend/backend overlaps
+	// Starts with a sort to get consistent order
+	serviceUpdateKeys := fun.Keys(serviceUpdateMap).([]string)
+	sort.Strings(serviceUpdateKeys)
+	for i := range serviceUpdateKeys {
+		s := serviceUpdateMap[serviceUpdateKeys[i]]
+		s.UniqueServiceName = s.UniqueServiceName + "-" + strconv.Itoa(i)
+		serviceUpdateMap[serviceUpdateKeys[i]] = s
 	}
 
-	return serviceUpdateSlice, nil
+	// From Map[frontend.rule]catalogUpdate to []catalogUpdate
+	serviceUpdateValues := fun.Values(serviceUpdateMap).([]catalogUpdate)
 
-	rules := fun.Keys(fun.Set(fun.Map(func(node *api.ServiceEntry) string {
-		return provider.getAttribute("frontend.rule", node.Service.Tags, "")
-	}, data).([]string)).(map[string]bool))
-	log.Info("rules " + service)
-	log.Info(rules)
-	return []catalogUpdate{}, nil
+	for i := range serviceUpdateValues {
+		// Ensure a stable ordering of nodes so that identical configurations may be detected
+		sort.Sort(nodeSorter(serviceUpdateValues[i].Nodes))
+	}
+
+	return serviceUpdateValues, nil
 }
 
 func (provider *ConsulCatalog) getEntryPoints(list string) []string {

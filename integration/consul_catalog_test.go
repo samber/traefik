@@ -87,6 +87,8 @@ func (s *ConsulCatalogSuite) testE2eConfiguration(c *check.C, nodes []service) *
 	c.Assert(err, checker.IsNil)
 	defer cmd.Process.Kill()
 
+	time.Sleep(5000 * time.Millisecond)
+
 	// registers some nodes and services
 	for _, node := range nodes {
 		err = s.registerService(node.name, node.address, node.port, node.tags)
@@ -136,7 +138,7 @@ func (s *ConsulCatalogSuite) TestSingleService(c *check.C) {
 
 	nginx := s.composeProject.Container(c, "nginx")
 
-	err = s.registerService("test", nginx.NetworkSettings.IPAddress, 80, []string{})
+	err = s.registerService("test", nginx.NetworkSettings.IPAddress, 80, []string{"traefik.enabled=true"})
 	c.Assert(err, checker.IsNil, check.Commentf("Error registering service"))
 	defer s.deregisterService("test", nginx.NetworkSettings.IPAddress)
 
@@ -194,26 +196,38 @@ func (s *ConsulCatalogSuite) TestSingleServiceMultipleRules(c *check.C) {
 				Backends: map[string]*types.Backend{
 					"backend-foobar-0": {
 						Servers: map[string]types.Server{
-							"foobar--1-1-1-1--80--0": {
-								URL:    "http://1.1.1.1",
+							"foobar--1-1-1-1--80--traefik-frontend-rule-Host-a-traefik-io--traefik-enable-true--0": {
+								URL:    "http://1.1.1.1:80",
 								Weight: 0,
 							},
+						},
+						LoadBalancer: &types.LoadBalancer{
+							Method: "wrr",
+							Sticky: false,
 						},
 					},
 					"backend-foobar-1": {
 						Servers: map[string]types.Server{
-							"foobar--2-2-2-2--80--0": {
-								URL:    "http://2.2.2.2",
+							"foobar--2-2-2-2--80--traefik-frontend-rule-Host-b-traefik-io--traefik-enable-true--0": {
+								URL:    "http://2.2.2.2:80",
 								Weight: 0,
 							},
+						},
+						LoadBalancer: &types.LoadBalancer{
+							Method: "wrr",
+							Sticky: false,
 						},
 					},
 					"backend-foobar-2": {
 						Servers: map[string]types.Server{
-							"foobar--3-3-3-3--80--0": {
-								URL:    "http://3.3.3.3",
+							"foobar--3-3-3-3--80--traefik-enable-true--0": {
+								URL:    "http://3.3.3.3:80",
 								Weight: 0,
 							},
+						},
+						LoadBalancer: &types.LoadBalancer{
+							Method: "wrr",
+							Sticky: false,
 						},
 					},
 				},
@@ -233,7 +247,7 @@ func (s *ConsulCatalogSuite) TestSingleServiceMultipleRules(c *check.C) {
 						EntryPoints: defaultEntrypoints,
 						Backend:     "backend-foobar-1",
 						Routes: map[string]types.Route{
-							"route-foobar-0": {
+							"route-foobar-1": {
 								Rule: "Host:b.traefik.io",
 							},
 						},
@@ -242,10 +256,10 @@ func (s *ConsulCatalogSuite) TestSingleServiceMultipleRules(c *check.C) {
 					},
 					"frontend-foobar-2": {
 						EntryPoints: defaultEntrypoints,
-						Backend:     "backend-foobar-0",
+						Backend:     "backend-foobar-2",
 						Routes: map[string]types.Route{
-							"route-foobar-0": {
-								Rule: "Host:foobar-2.traefik",
+							"route-foobar-2": {
+								Rule: "Host:foobar.consul.localhost",
 							},
 						},
 						PassHostHeader: true,
@@ -258,11 +272,17 @@ func (s *ConsulCatalogSuite) TestSingleServiceMultipleRules(c *check.C) {
 
 	for _, ca := range cases {
 		actualConfig := s.testE2eConfiguration(c, ca.nodes)
-		if !reflect.DeepEqual(actualConfig.Backends, ca.expected.Backends) {
-			c.Fatalf("expected %#v, got %#v", ca.expected.Backends, actualConfig.Backends)
+
+		// looping on expected backends/frontends will prune other backends/frontends automaticaly added
+		for backendName := range ca.expected.Backends {
+			if !reflect.DeepEqual(actualConfig.Backends[backendName], ca.expected.Backends[backendName]) {
+				c.Fatalf("expected %#v, got %#v", ca.expected.Backends[backendName], actualConfig.Backends[backendName])
+			}
 		}
-		if !reflect.DeepEqual(actualConfig.Frontends, ca.expected.Frontends) {
-			c.Fatalf("expected %#v, got %#v", ca.expected.Frontends, actualConfig.Frontends)
+		for frontendName := range ca.expected.Frontends {
+			if !reflect.DeepEqual(actualConfig.Frontends[frontendName], ca.expected.Frontends[frontendName]) {
+				c.Fatalf("expected %#v, got %#v", ca.expected.Frontends[frontendName], actualConfig.Frontends[frontendName])
+			}
 		}
 	}
 }

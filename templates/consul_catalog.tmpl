@@ -1,41 +1,37 @@
 [backends]
-{{range $index, $node := .Nodes}}
-  {{if ne (getAttribute "enable" $node.Service.Tags "true") "false"}}
-    [backends."backend-{{getBackend $node}}".servers."{{getBackendName $node $index}}"]
+{{range $pinkPoney, $service := .Services}}
+  {{range $index, $node := $service.Nodes}}
+    [backends."backend-{{$service.UniqueServiceName}}".servers."{{getBackendName $node $index}}"]
       url = "{{getAttribute "protocol" $node.Service.Tags "http"}}://{{getBackendAddress $node}}:{{$node.Service.Port}}"
       {{$weight := getAttribute "backend.weight" $node.Service.Tags "0"}}
       {{with $weight}}
         weight = {{$weight}}
       {{end}}
-    {{end}}
-{{end}}
+  {{end}}
 
-{{range .Services}}
-  {{$service := .ServiceName}}
-  {{$circuitBreaker := getAttribute "backend.circuitbreaker" .Attributes ""}}
+  {{$circuitBreaker := getAttribute "backend.circuitbreaker" $service.Attributes ""}}
   {{with $circuitBreaker}}
-  [backends."backend-{{$service}}".circuitbreaker]
+  [backends."backend-{{$service.UniqueServiceName}}".circuitbreaker]
     expression = "{{$circuitBreaker}}"
   {{end}}
 
-  {{$loadBalancer := getAttribute "backend.loadbalancer" .Attributes ""}}
+  {{$loadBalancer := getAttribute "backend.loadbalancer" $service.Attributes ""}}
   {{with $loadBalancer}}
-  [backends."backend-{{$service}}".loadbalancer]
+  [backends."backend-{{$service.UniqueServiceName}}".loadbalancer]
     method = "{{$loadBalancer}}"
   {{end}}
 
-  {{if hasMaxconnAttributes .Attributes}}
-  [backends."backend-{{$service}}".maxconn]
-    amount = {{getAttribute "backend.maxconn.amount" .Attributes "" }}
-    extractorfunc = "{{getAttribute "backend.maxconn.extractorfunc" .Attributes "" }}"
+  {{if hasMaxconnAttributes $service.Attributes}}
+  [backends."backend-{{$service.UniqueServiceName}}".maxconn]
+    amount = {{getAttribute "backend.maxconn.amount" $service.Attributes "" }}
+    extractorfunc = "{{getAttribute "backend.maxconn.extractorfunc" $service.Attributes "" }}"
   {{end}}
-
 {{end}}
 
 [frontends]
 {{range .Services}}
-  [frontends."frontend-{{.ServiceName}}"]
-  backend = "backend-{{.ServiceName}}"
+  [frontends."frontend-{{.UniqueServiceName}}"]
+  backend = "backend-{{.UniqueServiceName}}"
   passHostHeader = {{getAttribute "frontend.passHostHeader" .Attributes "true"}}
   priority = {{getAttribute "frontend.priority" .Attributes "0"}}
   {{$entryPoints := getAttribute "frontend.entrypoints" .Attributes ""}}
@@ -44,6 +40,6 @@
       "{{.}}",
     {{end}}]
   {{end}}
-  [frontends."frontend-{{.ServiceName}}".routes."route-host-{{.ServiceName}}"]
+  [frontends."frontend-{{.UniqueServiceName}}".routes."route-{{.UniqueServiceName}}"]
     rule = "{{getFrontendRule .}}"
 {{end}}
