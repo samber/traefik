@@ -36,14 +36,10 @@ type ConsulCatalog struct {
 	Prefix       string
 }
 
-type serviceUpdate struct {
+type catalogUpdate struct {
 	ServiceName string
 	Attributes  []string
-}
-
-type catalogUpdate struct {
-	Service *serviceUpdate
-	Nodes   []*api.ServiceEntry
+	Nodes       []*api.ServiceEntry
 }
 
 type nodeSorter []*api.ServiceEntry
@@ -73,6 +69,26 @@ func (a nodeSorter) Less(i int, j int) bool {
 		return lentr.Node.Address < rentr.Node.Address
 	}
 	return lentr.Service.Port < rentr.Service.Port
+}
+
+type serviceSorter []catalogUpdate
+
+func (a serviceSorter) Len() int {
+	return len(a)
+}
+
+func (a serviceSorter) Swap(i int, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+
+func (a serviceSorter) Less(i int, j int) bool {
+	lentr := a[i]
+	rentr := a[j]
+
+	ls := strings.ToLower(lentr.ServiceName)
+	lr := strings.ToLower(rentr.ServiceName)
+
+	return ls < lr
 }
 
 func (provider *ConsulCatalog) watchServices(stopCh <-chan struct{}) <-chan map[string][]string {
@@ -114,50 +130,79 @@ func (provider *ConsulCatalog) watchServices(stopCh <-chan struct{}) <-chan map[
 	return watchCh
 }
 
-func (provider *ConsulCatalog) healthyNodes(service string) (catalogUpdate, error) {
+func (provider *ConsulCatalog) healthyNodes(service string) ([]catalogUpdate, error) {
 	health := provider.client.Health()
 	opts := &api.QueryOptions{}
 	data, _, err := health.Service(service, "", true, opts)
 	if err != nil {
 		log.WithError(err).Errorf("Failed to fetch details of " + service)
-		return catalogUpdate{}, err
+		return []catalogUpdate{}, err
 	}
 
-	nodes := fun.Filter(func(node *api.ServiceEntry) bool {
+	// We group services by frontend rule, to build many-to-many relation between frontends and backends
+	serviceUpdateMap := fun.Foldl(func(node *api.ServiceEntry, set map[string]catalogUpdate) map[string]catalogUpdate {
+		frontendRule := provider.getAttribute("frontend.rule", node.Service.Tags, "")
+
 		constraintTags := provider.getContraintTags(node.Service.Tags)
 		ok, failingConstraint := provider.MatchConstraints(constraintTags)
 		if ok == false && failingConstraint != nil {
 			log.Debugf("Service %v pruned by '%v' constraint", service, failingConstraint.String())
+			return set
 		}
-		return ok
-	}, data).([]*api.ServiceEntry)
 
-	//Merge tags of nodes matching constraints, in a single slice.
-	tags := fun.Foldl(func(node *api.ServiceEntry, set []string) []string {
-		return fun.Keys(fun.Union(
-			fun.Set(set),
-			fun.Set(node.Service.Tags),
-		).(map[string]bool)).([]string)
-	}, []string{}, nodes).([]string)
+		// traefik.enable for each nodes
+		isEnabled := provider.getAttribute("enable", node.Service.Tags, "true")
+		if isEnabled == "false" {
+			log.Debugf("Service %v pruned by tag traefik.enable set to false", service)
+			return set
+		}
 
-	return catalogUpdate{
-		Service: &serviceUpdate{
-			ServiceName: service,
-			Attributes:  tags,
-		},
-		Nodes: nodes,
-	}, nil
+		if frontend, ok := set[frontendRule]; ok {
+			// Adding node to frontend, matching rule
+			// Merge tags of nodes matching constraints, in a single slice.
+			frontend.Attributes = fun.Keys(fun.Union(
+				fun.Set(frontend.Attributes),
+				fun.Set(node.Service.Tags),
+			).(map[string]bool)).([]string)
+			frontend.Nodes = append(frontend.Nodes, node)
+		} else {
+			// First node with this frontend rule
+			set[frontendRule] = catalogUpdate{
+				ServiceName: service,
+				Attributes:  node.Service.Tags,
+				Nodes: []*api.ServiceEntry{
+					node,
+				},
+			}
+		}
+		return set
+	}, map[string]catalogUpdate{}, data).(map[string]catalogUpdate)
+
+	// From Map[frontend.rule]catalogUpdate to []catalogUpdate
+	serviceUpdateSlice := fun.Values(serviceUpdateMap).([]catalogUpdate)
+
+	for i := range serviceUpdateSlice {
+		// Add an index to ServiceName to prevent overlap
+		serviceUpdateSlice[i].ServiceName = serviceUpdateSlice[i].ServiceName + "-" + strconv.Itoa(i)
+		// Ensure a stable ordering of nodes so that identical configurations may be detected
+		sort.Sort(nodeSorter(serviceUpdateSlice[i].Nodes))
+	}
+
+	return serviceUpdateSlice, nil
+
+	rules := fun.Keys(fun.Set(fun.Map(func(node *api.ServiceEntry) string {
+		return provider.getAttribute("frontend.rule", node.Service.Tags, "")
+	}, data).([]string)).(map[string]bool))
+	log.Info("rules " + service)
+	log.Info(rules)
+	return []catalogUpdate{}, nil
 }
 
 func (provider *ConsulCatalog) getEntryPoints(list string) []string {
 	return strings.Split(list, ",")
 }
 
-func (provider *ConsulCatalog) getBackend(node *api.ServiceEntry) string {
-	return strings.ToLower(node.Service.Service)
-}
-
-func (provider *ConsulCatalog) getFrontendRule(service serviceUpdate) string {
+func (provider *ConsulCatalog) getFrontendRule(service catalogUpdate) string {
 	customFrontendRule := provider.getAttribute("frontend.rule", service.Attributes, "")
 	if customFrontendRule != "" {
 		return customFrontendRule
@@ -213,7 +258,6 @@ func (provider *ConsulCatalog) getContraintTags(tags []string) []string {
 
 func (provider *ConsulCatalog) buildConfig(catalog []catalogUpdate) *types.Configuration {
 	var FuncMap = template.FuncMap{
-		"getBackend":           provider.getBackend,
 		"getFrontendRule":      provider.getFrontendRule,
 		"getBackendName":       provider.getBackendName,
 		"getBackendAddress":    provider.getBackendAddress,
@@ -222,28 +266,13 @@ func (provider *ConsulCatalog) buildConfig(catalog []catalogUpdate) *types.Confi
 		"hasMaxconnAttributes": provider.hasMaxconnAttributes,
 	}
 
-	allNodes := []*api.ServiceEntry{}
-	services := []*serviceUpdate{}
-	for _, info := range catalog {
-		for _, node := range info.Nodes {
-			isEnabled := provider.getAttribute("enable", node.Service.Tags, "true")
-			if isEnabled != "false" && len(info.Nodes) > 0 {
-				services = append(services, info.Service)
-				allNodes = append(allNodes, info.Nodes...)
-				break
-			}
-
-		}
-	}
 	// Ensure a stable ordering of nodes so that identical configurations may be detected
-	sort.Sort(nodeSorter(allNodes))
+	sort.Sort(serviceSorter(catalog))
 
 	templateObjects := struct {
-		Services []*serviceUpdate
-		Nodes    []*api.ServiceEntry
+		Services []catalogUpdate
 	}{
-		Services: services,
-		Nodes:    allNodes,
+		Services: catalog,
 	}
 
 	configuration, err := provider.getConfiguration("templates/consul_catalog.tmpl", FuncMap, templateObjects)
@@ -278,10 +307,8 @@ func (provider *ConsulCatalog) getNodes(index map[string][]string) ([]catalogUpd
 			if err != nil {
 				return nil, err
 			}
-			// healthy.Nodes can be empty if constraints do not match, without throwing error
-			if healthy.Service != nil && len(healthy.Nodes) > 0 {
-				nodes = append(nodes, healthy)
-			}
+
+			nodes = append(nodes, healthy...)
 		}
 	}
 	return nodes, nil
