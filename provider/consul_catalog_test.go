@@ -15,22 +15,24 @@ func TestConsulCatalogGetFrontendRule(t *testing.T) {
 	}
 
 	services := []struct {
-		service  serviceUpdate
+		service  catalogUpdate
 		expected string
 	}{
 		{
-			service: serviceUpdate{
+			service: catalogUpdate{
 				ServiceName: "foo",
 				Attributes:  []string{},
+				Nodes:       []*api.ServiceEntry{},
 			},
 			expected: "Host:foo.localhost",
 		},
 		{
-			service: serviceUpdate{
+			service: catalogUpdate{
 				ServiceName: "foo",
 				Attributes: []string{
 					"traefik.frontend.rule=Host:*.example.com",
 				},
+				Nodes: []*api.ServiceEntry{},
 			},
 			expected: "Host:*.example.com",
 		},
@@ -194,10 +196,9 @@ func TestConsulCatalogBuildConfig(t *testing.T) {
 		{
 			nodes: []catalogUpdate{
 				{
-					Service: &serviceUpdate{
-						ServiceName: "test",
-						Attributes:  []string{},
-					},
+					ServiceName: "test",
+					Attributes:  []string{},
+					Nodes:       []*api.ServiceEntry{},
 				},
 			},
 			expectedFrontends: map[string]*types.Frontend{},
@@ -206,15 +207,13 @@ func TestConsulCatalogBuildConfig(t *testing.T) {
 		{
 			nodes: []catalogUpdate{
 				{
-					Service: &serviceUpdate{
-						ServiceName: "test",
-						Attributes: []string{
-							"traefik.backend.loadbalancer=drr",
-							"traefik.backend.circuitbreaker=NetworkErrorRatio() > 0.5",
-							"random.foo=bar",
-							"traefik.backend.maxconn.amount=1000",
-							"traefik.backend.maxconn.extractorfunc=client.ip",
-						},
+					ServiceName: "test",
+					Attributes: []string{
+						"traefik.backend.loadbalancer=drr",
+						"traefik.backend.circuitbreaker=NetworkErrorRatio() > 0.5",
+						"random.foo=bar",
+						"traefik.backend.maxconn.amount=1000",
+						"traefik.backend.maxconn.extractorfunc=client.ip",
 					},
 					Nodes: []*api.ServiceEntry{
 						{

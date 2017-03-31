@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"os/exec"
+	"reflect"
 	"time"
 
+	"github.com/containous/traefik/types"
 	"github.com/go-check/check"
 	"github.com/hashicorp/consul/api"
 
@@ -17,6 +20,13 @@ type ConsulCatalogSuite struct {
 	BaseSuite
 	consulIP     string
 	consulClient *api.Client
+}
+
+type service struct {
+	name    string
+	address string
+	port    int
+	tags    []string
 }
 
 func (s *ConsulCatalogSuite) SetUpSuite(c *check.C) {
@@ -71,6 +81,38 @@ func (s *ConsulCatalogSuite) deregisterService(name string, address string) erro
 	return err
 }
 
+func (s *ConsulCatalogSuite) testE2eConfiguration(c *check.C, nodes []service) *types.Configuration {
+	cmd := exec.Command(traefikBinary, "--consulCatalog", "--consulCatalog.endpoint="+s.consulIP+":8500", "--consulCatalog.domain=consul.localhost", "--configFile=fixtures/consul_catalog/simple.toml", "--web", "--web.address=:8080")
+	err := cmd.Start()
+	c.Assert(err, checker.IsNil)
+	defer cmd.Process.Kill()
+
+	// registers some nodes and services
+	for _, node := range nodes {
+		err = s.registerService(node.name, node.address, node.port, node.tags)
+		c.Assert(err, checker.IsNil)
+	}
+
+	time.Sleep(5000 * time.Millisecond)
+
+	// retrieves traefik route table from api
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", "http://127.0.0.1:8080/api/providers/consul_catalog", nil)
+	c.Assert(err, checker.IsNil)
+	req.Host = "localhost:8080"
+	resp, err := client.Do(req)
+
+	c.Assert(err, checker.IsNil)
+	c.Assert(resp.StatusCode, checker.Equals, 200)
+
+	body, err := ioutil.ReadAll(resp.Body)
+	c.Assert(err, checker.IsNil)
+
+	var consulCatalogConfig types.Configuration
+	json.Unmarshal(body, &consulCatalogConfig)
+	return &consulCatalogConfig
+}
+
 func (s *ConsulCatalogSuite) TestSimpleConfiguration(c *check.C) {
 	cmd := exec.Command(traefikBinary, "--consulCatalog", "--consulCatalog.endpoint="+s.consulIP+":8500", "--configFile=fixtures/consul_catalog/simple.toml")
 	err := cmd.Start()
@@ -110,4 +152,117 @@ func (s *ConsulCatalogSuite) TestSingleService(c *check.C) {
 
 	_, err = ioutil.ReadAll(resp.Body)
 	c.Assert(err, checker.IsNil)
+}
+
+func (s *ConsulCatalogSuite) TestSingleServiceMultipleRules(c *check.C) {
+	defaultEntrypoints := []string{"http"}
+
+	cases := []struct {
+		nodes    []service
+		expected *types.Configuration
+	}{
+		{
+			nodes: []service{
+				{
+					name:    "foobar",
+					address: "1.1.1.1",
+					port:    80,
+					tags: []string{
+						"traefik.frontend.rule=Host:a.traefik.io",
+						"traefik.enable=true",
+					},
+				},
+				{
+					name:    "foobar",
+					address: "2.2.2.2",
+					port:    80,
+					tags: []string{
+						"traefik.frontend.rule=Host:b.traefik.io",
+						"traefik.enable=true",
+					},
+				},
+				{
+					name:    "foobar",
+					address: "3.3.3.3",
+					port:    80,
+					tags: []string{
+						"traefik.enable=true",
+					},
+				},
+			},
+			expected: &types.Configuration{
+				Backends: map[string]*types.Backend{
+					"backend-foobar-0": {
+						Servers: map[string]types.Server{
+							"foobar--1-1-1-1--80--0": {
+								URL:    "http://1.1.1.1",
+								Weight: 0,
+							},
+						},
+					},
+					"backend-foobar-1": {
+						Servers: map[string]types.Server{
+							"foobar--2-2-2-2--80--0": {
+								URL:    "http://2.2.2.2",
+								Weight: 0,
+							},
+						},
+					},
+					"backend-foobar-2": {
+						Servers: map[string]types.Server{
+							"foobar--3-3-3-3--80--0": {
+								URL:    "http://3.3.3.3",
+								Weight: 0,
+							},
+						},
+					},
+				},
+				Frontends: map[string]*types.Frontend{
+					"frontend-foobar-0": {
+						EntryPoints: defaultEntrypoints,
+						Backend:     "backend-foobar-0",
+						Routes: map[string]types.Route{
+							"route-foobar-0": {
+								Rule: "Host:a.traefik.io",
+							},
+						},
+						PassHostHeader: true,
+						Priority:       0,
+					},
+					"frontend-foobar-1": {
+						EntryPoints: defaultEntrypoints,
+						Backend:     "backend-foobar-1",
+						Routes: map[string]types.Route{
+							"route-foobar-0": {
+								Rule: "Host:b.traefik.io",
+							},
+						},
+						PassHostHeader: true,
+						Priority:       0,
+					},
+					"frontend-foobar-2": {
+						EntryPoints: defaultEntrypoints,
+						Backend:     "backend-foobar-0",
+						Routes: map[string]types.Route{
+							"route-foobar-0": {
+								Rule: "Host:foobar-2.traefik",
+							},
+						},
+						PassHostHeader: true,
+						Priority:       0,
+					},
+				},
+			},
+		},
+	}
+
+	for _, ca := range cases {
+		actualConfig := s.testE2eConfiguration(c, ca.nodes)
+		if !reflect.DeepEqual(actualConfig.Backends, ca.expected.Backends) {
+			c.Fatalf("expected %#v, got %#v", ca.expected.Backends, actualConfig.Backends)
+		}
+		if !reflect.DeepEqual(actualConfig.Frontends, ca.expected.Frontends) {
+			c.Fatalf("expected %#v, got %#v", ca.expected.Frontends, actualConfig.Frontends)
+		}
+	}
 }
