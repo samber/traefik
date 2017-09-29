@@ -273,6 +273,8 @@ func TestConsulCatalogBuildConfig(t *testing.T) {
 	for _, c := range cases {
 		actualConfig := provider.buildConfig(c.nodes)
 		if !reflect.DeepEqual(actualConfig.Backends, c.expectedBackends) {
+			t.Errorf("%v", c.expectedBackends)
+			t.Errorf("%v", actualConfig.Backends)
 			t.Fatalf("expected %#v, got %#v", c.expectedBackends, actualConfig.Backends)
 		}
 		if !reflect.DeepEqual(actualConfig.Frontends, c.expectedFrontends) {
